@@ -2,6 +2,8 @@
 
 Collection of internal tools for ILN workflow management.
 
+**Repository**: https://github.com/eman717/FileRenamerPro
+
 ## File Renamer Pro
 
 A desktop application for standardized artwork file naming and time tracking.
@@ -38,17 +40,43 @@ With subfolders:
 - **Portable**: Runs from USB, no installation required
 
 ### Key Files
-- `file_renamer_pro.py` - Main application (dark theme UI)
+- `file_renamer_pro.py` - Main application (1100+ lines, dark theme UI)
 - `config.json` - Customizable SKUs, production types, settings
 - `build_exe.py` - Build script for standalone .exe
 - `create_icon.py` - Generates app icon
+- `app_icon.ico` - Application icon (multi-resolution)
 
-### Building
+### Dependencies
+```
+tkinter (built-in)
+tkinterdnd2 (optional, for drag-drop support)
+Pillow (for icon generation only)
+PyInstaller (for building exe)
+```
+
+### Running from Source
+```bash
+cd file_renamer
+python file_renamer_pro.py
+```
+
+### Building Executable
 ```bash
 cd file_renamer
 python build_exe.py
 ```
 Output: `dist/FileRenamerPro.exe`
+
+### Deployment
+1. Copy `FileRenamerPro.exe` from `dist/` folder
+2. Optionally copy `config.json` for customization
+3. App creates `time_logs/` folder automatically for session tracking
+
+### Configuration
+Edit `config.json` to customize:
+- Available SKU options
+- Production output types (PRINT, CUTFILE, SUBLIMATION, etc.)
+- Default settings
 
 ### Tech Stack
 - Python 3 + Tkinter
@@ -57,3 +85,9 @@ Output: `dist/FileRenamerPro.exe`
 
 ### UI Theme
 Dark "Creative Studio" aesthetic with coral (#ff6b35) accent color, designed for graphic designers.
+
+Color palette:
+- Background: #1a1a2e (deep navy)
+- Cards: #16213e (dark blue)
+- Accent: #ff6b35 (coral)
+- Text: #e8e8e8 (light gray)
