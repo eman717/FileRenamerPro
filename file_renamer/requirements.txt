@@ -1,0 +1,5 @@
+# File Renamer - Dependencies
+# tkinter comes built-in with Python
+
+# For drag-and-drop support (optional but recommended)
+tkinterdnd2

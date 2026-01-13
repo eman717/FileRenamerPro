@@ -1,0 +1,56 @@
+{
+    "product_skus": [
+        "-- Select SKU --",
+        "MUG-11OZ",
+        "MUG-15OZ",
+        "TSHIRT-SM",
+        "TSHIRT-MD",
+        "TSHIRT-LG",
+        "TSHIRT-XL",
+        "POSTER-8x10",
+        "POSTER-11x14",
+        "POSTER-18x24",
+        "STICKER-3IN",
+        "STICKER-5IN",
+        "CANVAS-8x10",
+        "CANVAS-16x20",
+        "PHONECASE-IP14",
+        "PHONECASE-IP15",
+        "TOTE-STD",
+        "HOODIE-SM",
+        "HOODIE-MD",
+        "HOODIE-LG"
+    ],
+    "file_purposes": [
+        "PROOF",
+        "PRINT",
+        "WEB",
+        "SOURCE",
+        "MOCKUP",
+        "CUTFILE",
+        "PREVIEW"
+    ],
+    "revisions": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "FINAL"
+    ],
+    "timer_settings": {
+        "warning_minutes": 30,
+        "reminder_interval_minutes": 15,
+        "auto_save_log": true
+    },
+    "log_directory": "time_logs",
+    "job_folder_settings": {
+        "base_directory": "",
+        "job_number_pattern": "^(\\d+)",
+        "example_formats": [
+            "12345 - Client Name",
+            "JOB-12345",
+            "12345_ProjectName"
+        ]
+    }
+}

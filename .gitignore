@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Temp files
+tmpclaude-*
+nul
+*.tmp
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs (keep directory structure but not contents)
+time_logs/*.json
+
+# OS
+.DS_Store
+Thumbs.db
