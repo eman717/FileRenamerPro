@@ -52,8 +52,114 @@ from src.settings_dialog import SettingsDialog
 try:
     from tkinterdnd2 import TkinterDnD
     HAS_DND = True
-except ImportError:
+    DND_INSTALL_ERROR = None
+except ImportError as e:
     HAS_DND = False
+    DND_INSTALL_ERROR = str(e)
+
+
+def check_and_install_dnd():
+    """Check for tkinterdnd2 and offer to install it"""
+    if HAS_DND:
+        return True
+    
+    # Create a simple dialog to ask user
+    root = tk.Tk()
+    root.withdraw()  # Hide main window
+    
+    result = messagebox.askyesno(
+        "Drag & Drop Support",
+        "The tkinterdnd2 package is not installed.\n\n"
+        "This package enables drag & drop functionality, which makes "
+        "adding files much easier.\n\n"
+        "Would you like to install it now?\n\n"
+        "(Requires internet connection. App will restart after installation.)",
+        icon='question'
+    )
+    
+    if result:
+        root.destroy()
+        return install_tkinterdnd2()
+    
+    # User declined - show info about manual install
+    messagebox.showinfo(
+        "Continuing Without Drag & Drop",
+        "You can still use the app by clicking the '+ MAIN', '+ PROOF', "
+        "and '+ PROD' buttons to add files.\n\n"
+        "To install drag & drop support later, run:\n"
+        "pip install tkinterdnd2"
+    )
+    root.destroy()
+    return False
+
+
+def install_tkinterdnd2():
+    """Attempt to install tkinterdnd2 using pip"""
+    import subprocess
+    
+    # Show progress window
+    progress_root = tk.Tk()
+    progress_root.title("Installing...")
+    progress_root.geometry("350x100")
+    progress_root.resizable(False, False)
+    
+    # Center on screen
+    progress_root.update_idletasks()
+    x = (progress_root.winfo_screenwidth() - 350) // 2
+    y = (progress_root.winfo_screenheight() - 100) // 2
+    progress_root.geometry(f"+{x}+{y}")
+    
+    label = tk.Label(progress_root, text="Installing tkinterdnd2...\nPlease wait...", 
+                    font=("Segoe UI", 11), pady=20)
+    label.pack(expand=True)
+    progress_root.update()
+    
+    try:
+        # Run pip install
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "tkinterdnd2"],
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        
+        progress_root.destroy()
+        
+        if result.returncode == 0:
+            messagebox.showinfo(
+                "Installation Successful",
+                "tkinterdnd2 has been installed successfully!\n\n"
+                "The application will now restart to enable drag & drop."
+            )
+            # Restart the application
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+            return True
+        else:
+            messagebox.showerror(
+                "Installation Failed",
+                f"Failed to install tkinterdnd2.\n\n"
+                f"Error: {result.stderr}\n\n"
+                "You can try installing manually by running:\n"
+                "pip install tkinterdnd2"
+            )
+            return False
+            
+    except subprocess.TimeoutExpired:
+        progress_root.destroy()
+        messagebox.showerror(
+            "Installation Timeout",
+            "Installation timed out. Please check your internet connection "
+            "and try installing manually:\n\npip install tkinterdnd2"
+        )
+        return False
+    except Exception as e:
+        progress_root.destroy()
+        messagebox.showerror(
+            "Installation Error",
+            f"An error occurred during installation:\n{e}\n\n"
+            "Please try installing manually:\npip install tkinterdnd2"
+        )
+        return False
 
 # Configuration paths
 CONFIG_FILE = SCRIPT_DIR / "config.json"
@@ -828,7 +934,21 @@ class FileRenamerPro:
 
 def main():
     """Main entry point"""
+    global HAS_DND
+    
+    # Check for drag-drop support on first run
+    if not HAS_DND:
+        # Check if user wants to install it
+        check_and_install_dnd()
+        # Try importing again in case it was just installed
+        try:
+            from tkinterdnd2 import TkinterDnD
+            HAS_DND = True
+        except ImportError:
+            pass
+    
     if HAS_DND:
+        from tkinterdnd2 import TkinterDnD
         root = TkinterDnD.Tk()
     else:
         root = tk.Tk()
