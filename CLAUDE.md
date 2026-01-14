@@ -33,6 +33,7 @@ With subfolders:
 
 ### Features
 - **Three Drop Zones**: Main Design (SOURCE), Virtual Proof (PROOF), Production Output (PRINT, CUTFILE, etc.)
+- **Drag & Drop**: Full drag-and-drop support (bundled in exe, auto-install prompt when running from source)
 - **Auto-Routing**: Files automatically placed in correct subfolder
 - **Job Parsing**: Extracts job info from folder name
 - **Revision Detection**: Auto-detects next revision number
