@@ -76,19 +76,19 @@ class Theme:
     BORDER_FOCUS = "#ff6b35"
 
     # Typography
-    FONT_DISPLAY = ("Segoe UI", 11, "bold")
-    FONT_BODY = ("Segoe UI", 10)
-    FONT_SMALL = ("Segoe UI", 9)
-    FONT_MONO = ("Cascadia Code", 10)
-    FONT_MONO_LARGE = ("Cascadia Code", 36, "bold")
-    FONT_BUTTON = ("Segoe UI Semibold", 10)
+    FONT_DISPLAY = ("Segoe UI", 10, "bold")
+    FONT_BODY = ("Segoe UI", 9)
+    FONT_SMALL = ("Segoe UI", 8)
+    FONT_MONO = ("Cascadia Code", 9)
+    FONT_MONO_LARGE = ("Cascadia Code", 28, "bold")
+    FONT_BUTTON = ("Segoe UI Semibold", 9)
 
     # Spacing
-    PAD_XS = 4
-    PAD_SM = 8
-    PAD_MD = 12
-    PAD_LG = 16
-    PAD_XL = 24
+    PAD_XS = 3
+    PAD_SM = 6
+    PAD_MD = 10
+    PAD_LG = 12
+    PAD_XL = 18
 
 
 def load_config():
@@ -537,7 +537,7 @@ class FileRenamerPro:
     def __init__(self, root):
         self.root = root
         self.root.title("File Renamer Pro")
-        self.root.geometry("950x900")
+        self.root.geometry("950x700")
         self.root.resizable(True, True)
         self.root.configure(bg=Theme.BG_PRIMARY)
 
@@ -569,9 +569,23 @@ class FileRenamerPro:
                        font=Theme.FONT_SMALL)
 
     def setup_ui(self):
-        main_frame = tk.Frame(self.root, bg=Theme.BG_PRIMARY)
-        main_frame.pack(fill="both", expand=True, padx=Theme.PAD_LG, pady=Theme.PAD_LG)
+        # Main scrollable frame
+        main_canvas = tk.Canvas(self.root, bg=Theme.BG_PRIMARY, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=main_canvas.yview)
+        scrollable_frame = tk.Frame(main_canvas, bg=Theme.BG_PRIMARY)
 
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: main_canvas.configure(scrollregion=main_canvas.bbox("all"))
+        )
+
+        main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        main_canvas.configure(yscrollcommand=scrollbar.set)
+
+        main_canvas.pack(side="left", fill="both", expand=True, padx=Theme.PAD_MD, pady=Theme.PAD_MD)
+        scrollbar.pack(side="right", fill="y")
+
+        main_frame = scrollable_frame
         main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(3, weight=1)
 
