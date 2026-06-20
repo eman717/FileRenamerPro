@@ -1,5 +1,6 @@
 """
-File Renamer Pro v2 - Artwork Naming Tool with Time Tracking
+Job Art Naming Helper v2 - Artwork job & naming tool with time tracking
+(formerly "File Renamer Pro")
 Refactored with modular architecture, undo/redo, and improved UX
 
 Naming Convention: <Job#>_<ProductSKU>_(<ArtworkReference>)_<FilePurpose>_<revision#>.<filetype>
@@ -14,20 +15,34 @@ Job Folder Structure:
 """
 
 import os
+import re
 import sys
+import shutil
 import logging
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
+from datetime import datetime
 from typing import Optional
 
-# Setup logging
+# Setup logging. Also write to a log file next to the app (exe when frozen,
+# otherwise this script) so errors are visible even when run without a console.
+if getattr(sys, "frozen", False):
+    _app_dir = os.path.dirname(sys.executable)
+else:
+    _app_dir = os.path.dirname(os.path.abspath(__file__))
+_log_file = os.path.join(_app_dir, "file_renamer.log")
+
+_handlers = [logging.StreamHandler()]
+try:
+    _handlers.append(logging.FileHandler(_log_file, encoding="utf-8"))
+except OSError:
+    pass  # read-only location (e.g. some USB setups) — console logging only
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-    ]
+    handlers=_handlers,
 )
 logger = logging.getLogger(__name__)
 
@@ -41,7 +56,7 @@ from src.job_parser import JobFolderParser
 from src.timer import TimerManager
 from src.revision import RevisionDetector
 from src.services import RenameService, UndoManager
-from src.utils import open_folder, sanitize_filename, ensure_directory
+from src.utils import open_folder, open_file, sanitize_filename, ensure_directory
 from src.widgets import (
     StyledButton, SectionCard, DropZone, StyledEntry, 
     StatusBar, ScrollableFrame, Tooltip
@@ -161,22 +176,44 @@ def install_tkinterdnd2():
         )
         return False
 
-# Configuration paths
-CONFIG_FILE = SCRIPT_DIR / "config.json"
+# Configuration paths. Read/write config.json next to the app so settings
+# (incl. the Recent list) persist. In a frozen --onefile build, SCRIPT_DIR is a
+# temp extraction dir, so use the exe's directory and seed it from the bundled
+# default config on first run.
+if getattr(sys, "frozen", False):
+    CONFIG_FILE = Path(_app_dir) / "config.json"
+    _bundled_config = Path(getattr(sys, "_MEIPASS", _app_dir)) / "config.json"
+    if not CONFIG_FILE.exists() and _bundled_config.exists():
+        try:
+            shutil.copy2(_bundled_config, CONFIG_FILE)
+        except OSError:
+            logger.warning("Could not seed config.json next to the exe")
+else:
+    CONFIG_FILE = SCRIPT_DIR / "config.json"
 
 # Subfolder names
 SUBFOLDER_ART_SETUPS = "4_ArtSetups"
 SUBFOLDER_PROOFS = "5_VirtualProofs"
 
+# The five standard subfolders expected inside every job folder
+STANDARD_SUBFOLDERS = [
+    "1_TheirPOs",
+    "2_OurDocs",
+    "3_ProvidedArt",
+    SUBFOLDER_ART_SETUPS,
+    SUBFOLDER_PROOFS,
+]
 
-class FileRenamerPro:
-    """Main application class for File Renamer Pro"""
+
+class JobArtNamingHelper:
+    """Main application class for Job Art Naming Helper"""
 
     def __init__(self, root):
         self.root = root
-        self.root.title("File Renamer Pro")
-        self.root.geometry("950x700")
-        self.root.minsize(800, 600)
+        self.root.title("Job Art Naming Helper")
+        # Narrow, tall default (≈1/4–1/3 of a 1920-wide screen); fully resizable
+        self.root.geometry("600x860")
+        self.root.minsize(440, 560)
         self.root.resizable(True, True)
         self.root.configure(bg=Theme.BG_PRIMARY)
 
@@ -195,17 +232,20 @@ class FileRenamerPro:
         self.job_info = {}
         self.files_renamed_this_session = 0
         self.auto_revision_enabled = tk.BooleanVar(value=True)
+        self._last_folder_sig = None  # for live folder-contents refresh
 
         # Setup UI
         self._setup_styles()
         self._setup_ui()
         self._setup_keyboard_shortcuts()
+        # Watch the job folder so the file lists reflect on-disk changes live
+        self._poll_folder_contents()
         self._start_timer_update()
 
         # Set icon
         self._set_icon()
 
-        logger.info("File Renamer Pro initialized")
+        logger.info("Job Art Naming Helper initialized")
 
     def _set_icon(self):
         """Set application icon"""
@@ -259,6 +299,7 @@ class FileRenamerPro:
         self._create_header(main_frame)
         self._create_timer_section(main_frame)
         self._create_job_section(main_frame)
+        self._create_folder_contents(main_frame)
         self._create_drop_zones(main_frame)
         self._create_action_bar(main_frame)
 
@@ -274,12 +315,12 @@ class FileRenamerPro:
         title_frame = tk.Frame(header, bg=Theme.BG_PRIMARY)
         title_frame.pack(side="left")
 
-        tk.Label(title_frame, text="FILE RENAMER", font=Theme.FONT_TITLE,
+        tk.Label(title_frame, text="JOB ART NAMING", font=Theme.FONT_TITLE,
                 fg=Theme.TEXT_PRIMARY, bg=Theme.BG_PRIMARY).pack(side="left")
-        tk.Label(title_frame, text=" PRO", font=Theme.FONT_TITLE,
+        tk.Label(title_frame, text=" HELPER", font=Theme.FONT_TITLE,
                 fg=Theme.ACCENT_PRIMARY, bg=Theme.BG_PRIMARY).pack(side="left")
 
-        tk.Label(header, text="Artwork Naming Tool v2.0", font=Theme.FONT_SMALL,
+        tk.Label(header, text="Artwork job & naming tool v2.0", font=Theme.FONT_SMALL,
                 fg=Theme.TEXT_TERTIARY, bg=Theme.BG_PRIMARY).pack(side="left", padx=(Theme.PAD_MD, 0), pady=(8, 0))
 
         # Undo/Redo and Settings buttons
@@ -356,14 +397,12 @@ class FileRenamerPro:
         tk.Label(label_row, text="JOB FOLDER", font=Theme.FONT_SECTION,
                 fg=Theme.TEXT_TERTIARY, bg=Theme.BG_SECONDARY).pack(side="left")
 
-        # Recent folders dropdown
-        if self.config.job_folder_settings.recent_folders:
-            self.recent_var = tk.StringVar(value="Recent...")
-            recent_menu = ttk.Combobox(label_row, textvariable=self.recent_var,
-                                       values=["Recent..."] + self.config.job_folder_settings.recent_folders[:5],
-                                       width=20, state="readonly", style="Dark.TCombobox")
-            recent_menu.pack(side="right")
-            recent_menu.bind("<<ComboboxSelected>>", self._on_recent_selected)
+        # Recent folders — opens a readable picker centered over the app
+        self.recent_btn = StyledButton(label_row, text="RECENT",
+                                       command=self.show_recent_folders,
+                                       variant="secondary", width=80, height=26)
+        self.recent_btn.pack(side="right")
+        self.recent_btn.set_tooltip("Open a recently used job folder")
 
         input_row = tk.Frame(folder_row, bg=Theme.BG_SECONDARY)
         input_row.pack(fill="x", pady=(Theme.PAD_XS, 0))
@@ -371,11 +410,28 @@ class FileRenamerPro:
         self.job_folder_display = StyledEntry(input_row, placeholder="Select main job folder... (Ctrl+O)")
         self.job_folder_display.pack(side="left", fill="x", expand=True, ipady=6)
         self.job_folder_display.config(state="readonly")
+        # The path is selectable/copyable even while readonly. Add a right-click
+        # "Copy" menu and Ctrl+A select-all so it's obviously copy/pastable.
+        self._folder_menu = tk.Menu(self.job_folder_display, tearoff=0)
+        self._folder_menu.add_command(label="Copy full path",
+                                      command=self._copy_job_folder_path)
+        self.job_folder_display.bind("<Button-3>", self._show_folder_menu)
+        self.job_folder_display.bind(
+            "<Control-a>",
+            lambda e: (self.job_folder_display.select_range(0, tk.END),
+                       self.job_folder_display.icursor(tk.END), "break")[-1])
 
         browse_btn = StyledButton(input_row, text="BROWSE", command=self.browse_job_folder,
                                   variant="secondary", width=90, height=34)
         browse_btn.pack(side="right", padx=(Theme.PAD_SM, 0))
         browse_btn.set_tooltip("Browse for job folder (Ctrl+O)")
+
+        # Loaded-job confirmation, shown right below the folder address field
+        # (previously only appeared in the status bar at the bottom of the window)
+        self.job_loaded_label = tk.Label(folder_row, text="", anchor="w",
+                                         font=Theme.FONT_SMALL, fg=Theme.ACCENT_SUCCESS,
+                                         bg=Theme.BG_SECONDARY)
+        self.job_loaded_label.pack(fill="x", pady=(Theme.PAD_XS, 0))
 
         # Parsed info display
         self.job_info_frame = tk.Frame(content, bg=Theme.BG_SECONDARY)
@@ -389,17 +445,26 @@ class FileRenamerPro:
         row1 = tk.Frame(info_grid, bg=Theme.BG_SECONDARY)
         row1.pack(fill="x", pady=(0, Theme.PAD_SM))
 
-        self.info_job = self._create_info_field(row1, "JOB #", "-")
-        self.info_customer = self._create_info_field(row1, "CUSTOMER", "-")
-        self.info_company = self._create_info_field(row1, "COMPANY", "-")
+        self.info_job, self.info_job_src = self._create_info_field(row1, "JOB #", "-")
+        self.info_customer, self.info_customer_src = self._create_info_field(row1, "CUSTOMER", "-")
+        self.info_company, self.info_company_src = self._create_info_field(row1, "COMPANY", "-")
 
         # Row 2: SKU, Qty, PO#
         row2 = tk.Frame(info_grid, bg=Theme.BG_SECONDARY)
-        row2.pack(fill="x")
+        row2.pack(fill="x", pady=(0, Theme.PAD_SM))
 
-        self.info_sku = self._create_info_field(row2, "SKU", "-")
-        self.info_qty = self._create_info_field(row2, "QTY", "-")
-        self.info_po = self._create_info_field(row2, "PO #", "-")
+        self.info_sku, self.info_sku_src = self._create_info_field(row2, "SKU", "-")
+        self.info_qty, self.info_qty_src = self._create_info_field(row2, "QTY", "-")
+        self.info_po, self.info_po_src = self._create_info_field(row2, "PO #", "-")
+
+        # Row 3: Date (from the date-based job number, or folder created date)
+        row3 = tk.Frame(info_grid, bg=Theme.BG_SECONDARY)
+        row3.pack(fill="x")
+
+        self.info_date, self.info_date_src = self._create_info_field(row3, "DATE", "-")
+        # Empty spacers keep the 3-column alignment with the rows above
+        self._create_info_field(row3, "", "")
+        self._create_info_field(row3, "", "")
 
         # Divider
         tk.Frame(content, bg=Theme.BORDER_SUBTLE, height=1).pack(fill="x", pady=Theme.PAD_MD)
@@ -437,23 +502,84 @@ class FileRenamerPro:
         self.existing_rev_label.pack(side="left", padx=(Theme.PAD_MD, 0))
 
     def _create_info_field(self, parent, label: str, value: str):
-        """Create a labeled info field"""
+        """Create a labeled info field with a small data-source caption below it.
+
+        Returns (value_label, source_label).
+        """
         frame = tk.Frame(parent, bg=Theme.BG_SECONDARY)
         frame.pack(side="left", fill="x", expand=True, padx=(0, Theme.PAD_MD))
 
-        tk.Label(frame, text=label, font=("Segoe UI", 8), fg=Theme.TEXT_TERTIARY, 
+        tk.Label(frame, text=label, font=("Segoe UI", 8), fg=Theme.TEXT_TERTIARY,
                 bg=Theme.BG_SECONDARY).pack(anchor="w")
 
         value_label = tk.Label(frame, text=value, font=("Segoe UI Semibold", 11),
                                fg=Theme.TEXT_PRIMARY, bg=Theme.BG_SECONDARY)
         value_label.pack(anchor="w")
 
-        return value_label
+        source_label = tk.Label(frame, text="", font=Theme.FONT_SMALL,
+                                fg=Theme.TEXT_TERTIARY, bg=Theme.BG_SECONDARY)
+        source_label.pack(anchor="w")
+
+        return value_label, source_label
+
+    def _create_folder_contents(self, parent):
+        """Create the job folder contents section: standard-folder status with a
+        create button, and clickable file lists for the two working folders."""
+        card = SectionCard(parent, title="Job Folder Contents")
+        card.grid(row=3, column=0, sticky="ew", pady=(0, Theme.PAD_MD))
+        content = card.content
+
+        # Standard-folders status row + create button
+        status_row = tk.Frame(content, bg=Theme.BG_SECONDARY)
+        status_row.pack(fill="x")
+
+        tk.Label(status_row, text="STANDARD FOLDERS", font=Theme.FONT_SECTION,
+                 fg=Theme.TEXT_TERTIARY, bg=Theme.BG_SECONDARY).pack(side="left")
+
+        self.create_folders_btn = StyledButton(
+            status_row, text="CREATE FOLDERS", command=self.create_standard_folders,
+            variant="secondary", width=140, height=30)
+        self.create_folders_btn.pack(side="right")
+        self.create_folders_btn.set_tooltip("Create any missing standard subfolders")
+        self.create_folders_btn.set_enabled(False)
+
+        self.folders_status_label = tk.Label(
+            content, text="Select a job folder to see its contents.",
+            font=Theme.FONT_SMALL, fg=Theme.TEXT_SECONDARY, bg=Theme.BG_SECONDARY,
+            anchor="w", justify="left")
+        self.folders_status_label.pack(fill="x", pady=(Theme.PAD_XS, Theme.PAD_SM))
+
+        # Clickable file lists for the two working folders
+        lists_row = tk.Frame(content, bg=Theme.BG_SECONDARY)
+        lists_row.pack(fill="both", expand=True)
+
+        self.artsetups_listbox = self._create_file_list(
+            lists_row, f"{SUBFOLDER_ART_SETUPS}  (double-click to open)")
+        self.proofs_listbox = self._create_file_list(
+            lists_row, f"{SUBFOLDER_PROOFS}  (double-click to open)")
+
+    def _create_file_list(self, parent, title: str):
+        """Create a titled, clickable file listbox. Returns the Listbox."""
+        frame = tk.Frame(parent, bg=Theme.BG_SECONDARY)
+        frame.pack(side="left", fill="both", expand=True, padx=(0, Theme.PAD_SM))
+
+        tk.Label(frame, text=title, font=("Segoe UI", 8), fg=Theme.TEXT_TERTIARY,
+                 bg=Theme.BG_SECONDARY).pack(anchor="w")
+
+        listbox = tk.Listbox(
+            frame, height=6, bg=Theme.BG_TERTIARY, fg=Theme.TEXT_PRIMARY,
+            selectbackground=Theme.ACCENT_PRIMARY, selectforeground=Theme.TEXT_PRIMARY,
+            relief="flat", highlightthickness=1, highlightbackground=Theme.BORDER_SUBTLE,
+            highlightcolor=Theme.BORDER_FOCUS, activestyle="none", font=Theme.FONT_SMALL)
+        listbox.pack(fill="both", expand=True, pady=(Theme.PAD_XS, 0))
+        listbox.bind("<Double-Button-1>", self._on_file_list_open)
+        listbox._file_paths = []  # parallel list of full paths (None = placeholder)
+        return listbox
 
     def _create_drop_zones(self, parent):
         """Create the three drop zones"""
         card = SectionCard(parent, title="Files to Rename")
-        card.grid(row=3, column=0, sticky="nsew", pady=(0, Theme.PAD_MD))
+        card.grid(row=4, column=0, sticky="nsew", pady=(0, Theme.PAD_MD))
 
         content = card.content
         content.pack_configure(fill="both", expand=True)
@@ -543,7 +669,7 @@ class FileRenamerPro:
     def _create_action_bar(self, parent):
         """Create action bar"""
         action_bar = tk.Frame(parent, bg=Theme.BG_PRIMARY)
-        action_bar.grid(row=4, column=0, sticky="ew", pady=(0, Theme.PAD_SM))
+        action_bar.grid(row=5, column=0, sticky="ew", pady=(0, Theme.PAD_SM))
 
         left_frame = tk.Frame(action_bar, bg=Theme.BG_PRIMARY)
         left_frame.pack(side="left")
@@ -574,28 +700,354 @@ class FileRenamerPro:
             base_dir = None
         folder = filedialog.askdirectory(title="Select Main Job Folder", initialdir=base_dir)
         if folder:
-            self.set_job_folder(folder)
+            self._load_job_folder_safely(folder)
 
-    def _on_recent_selected(self, event):
-        """Handle recent folder selection"""
-        selected = self.recent_var.get()
-        if selected and selected != "Recent..." and os.path.isdir(selected):
-            self.set_job_folder(selected)
-        self.recent_var.set("Recent...")
+    def show_recent_folders(self):
+        """Open a centered popup listing recent job folders, each shown by its
+        readable folder name plus full path (the old combobox truncated them)."""
+        recents = list(self.config.job_folder_settings.recent_folders or [])
+        if not recents:
+            self.status_bar.set_message("No recent folders yet", "info")
+            return
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Recent Job Folders")
+        dlg.configure(bg=Theme.BG_SECONDARY)
+        dlg.transient(self.root)
+
+        # Center over the app window
+        w, h = 600, 420
+        self.root.update_idletasks()
+        x = self.root.winfo_rootx() + max((self.root.winfo_width() - w) // 2, 0)
+        y = self.root.winfo_rooty() + max((self.root.winfo_height() - h) // 3, 0)
+        dlg.geometry(f"{w}x{h}+{x}+{y}")
+        dlg.minsize(360, 240)
+
+        tk.Label(dlg, text="Recent Job Folders", font=Theme.FONT_DISPLAY,
+                 fg=Theme.TEXT_PRIMARY, bg=Theme.BG_SECONDARY, anchor="w").pack(
+                     fill="x", padx=Theme.PAD_MD, pady=(Theme.PAD_MD, Theme.PAD_SM))
+
+        scroller = ScrollableFrame(dlg, bg=Theme.BG_SECONDARY)
+        scroller.pack(fill="both", expand=True, padx=Theme.PAD_MD)
+        listframe = scroller.scrollable_frame
+
+        def choose(path):
+            if not os.path.isdir(path):
+                self.status_bar.set_message("That folder no longer exists", "error")
+                return
+            dlg.destroy()
+            self._load_job_folder_safely(path)
+
+        for path in recents:
+            exists = os.path.isdir(path)
+            row = tk.Frame(listframe, bg=Theme.BG_TERTIARY,
+                           cursor="hand2" if exists else "arrow")
+            row.pack(fill="x", pady=2)
+            name = os.path.basename(path.rstrip("/\\")) or path
+            title = tk.Label(row, text=name + ("" if exists else "   (missing)"),
+                             font=("Segoe UI Semibold", 10),
+                             fg=Theme.TEXT_PRIMARY if exists else Theme.ACCENT_DANGER,
+                             bg=Theme.BG_TERTIARY, anchor="w", justify="left")
+            title.pack(fill="x", padx=Theme.PAD_SM, pady=(Theme.PAD_SM, 0))
+            sub = tk.Label(row, text=os.path.normpath(path), font=Theme.FONT_SMALL,
+                           fg=Theme.TEXT_TERTIARY, bg=Theme.BG_TERTIARY, anchor="w",
+                           justify="left", wraplength=w - 60)
+            sub.pack(fill="x", padx=Theme.PAD_SM, pady=(0, Theme.PAD_SM))
+
+            widgets = [row, title, sub]
+            for wdg in widgets:
+                wdg.bind("<Button-1>", lambda e, p=path: choose(p))
+                if exists:
+                    wdg.bind("<Enter>", lambda e, ws=widgets:
+                             [x.config(bg=Theme.BG_ELEVATED) for x in ws])
+                    wdg.bind("<Leave>", lambda e, ws=widgets:
+                             [x.config(bg=Theme.BG_TERTIARY) for x in ws])
+
+        btn_row = tk.Frame(dlg, bg=Theme.BG_SECONDARY)
+        btn_row.pack(fill="x", padx=Theme.PAD_MD, pady=Theme.PAD_MD)
+        StyledButton(btn_row, text="CLOSE", command=dlg.destroy,
+                     variant="secondary", width=90, height=30).pack(side="right")
+
+        dlg.grab_set()
+
+    def _show_folder_menu(self, event):
+        """Show the right-click Copy menu for the job folder path."""
+        if not self.job_folder_display.get():
+            return
+        try:
+            self._folder_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._folder_menu.grab_release()
+
+    def _copy_job_folder_path(self):
+        """Copy the full job folder path to the clipboard."""
+        path = self.job_folder_display.get()
+        if not path:
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(path)
+        self.status_bar.set_message("Copied folder path to clipboard", "info")
+
+    def _load_job_folder_safely(self, folder: str):
+        """Load a job folder, surfacing (and logging) any failure."""
+        try:
+            self.set_job_folder(folder)
+        except Exception as e:
+            logger.exception("Failed to load job folder: %s", folder)
+            messagebox.showerror("Error Loading Folder",
+                                 f"Could not load job folder:\n\n{e}")
+
+    @staticmethod
+    def _get_folder_created_date(folder_path: str) -> str:
+        """Return the folder's created date as 'YYYY-MM-DD', or '' on failure."""
+        try:
+            ctime = os.path.getctime(folder_path)
+            return datetime.fromtimestamp(ctime).strftime("%Y-%m-%d")
+        except OSError:
+            return ""
+
+    def _set_info_field(self, value_label, source_label, value, source):
+        """Set an info field's value and the data-source caption beneath it.
+
+        source: "name" (parsed from the folder name), "metadata" (derived from
+        the folder's filesystem metadata), or "" (unknown / no value).
+        """
+        value_label.config(text=value or "-")
+        if not value:
+            source_label.config(text="")
+        elif source == "name":
+            source_label.config(text="Source: Folder name", fg=Theme.ACCENT_SUCCESS)
+        elif source == "metadata":
+            source_label.config(text="Source: Metadata", fg=Theme.ACCENT_WARNING)
+        else:
+            source_label.config(text="", fg=Theme.TEXT_TERTIARY)
+
+    @staticmethod
+    def _normalize_folder_key(name: str) -> str:
+        """Normalize a folder name for tolerant matching: lowercase, drop a
+        leading numeric/separator prefix (e.g. "4_"), and strip non-alphanumerics.
+        So "4_ArtSetups", "4_Art Setups", "art_setups" and "ArtSetups" all map
+        to "artsetups"."""
+        s = name.strip().lower()
+        s = re.sub(r'^[\d_\-.\s]+', '', s)   # drop leading "4_", "4 ", "4-", ...
+        s = re.sub(r'[^a-z0-9]+', '', s)     # drop spaces/underscores/etc.
+        return s
+
+    def _scan_standard_folders(self):
+        """Classify each standard subfolder against what's on disk.
+
+        Returns a list of dicts: {canonical, status, actual} where status is
+        'present' (exact), 'matched' (a name variant exists) or 'missing'.
+        """
+        existing = {}  # normalized key -> actual on-disk name
+        try:
+            for entry in os.listdir(self.job_folder_path):
+                if os.path.isdir(os.path.join(self.job_folder_path, entry)):
+                    existing.setdefault(self._normalize_folder_key(entry), entry)
+        except OSError:
+            pass
+
+        result = []
+        for canonical in STANDARD_SUBFOLDERS:
+            key = self._normalize_folder_key(canonical)
+            if os.path.isdir(os.path.join(self.job_folder_path, canonical)):
+                result.append({'canonical': canonical, 'status': 'present',
+                               'actual': canonical})
+            elif key in existing:
+                result.append({'canonical': canonical, 'status': 'matched',
+                               'actual': existing[key]})
+            else:
+                result.append({'canonical': canonical, 'status': 'missing',
+                               'actual': canonical})
+        return result
+
+    def _resolve_subfolder(self, canonical: str) -> str:
+        """Path to the on-disk folder for a standard subfolder, tolerating name
+        variants. Falls back to the canonical path if nothing matches."""
+        if not self.job_folder_path:
+            return canonical
+        canonical_path = os.path.join(self.job_folder_path, canonical)
+        if os.path.isdir(canonical_path):
+            return canonical_path
+        target = self._normalize_folder_key(canonical)
+        try:
+            for entry in os.listdir(self.job_folder_path):
+                full = os.path.join(self.job_folder_path, entry)
+                if os.path.isdir(full) and self._normalize_folder_key(entry) == target:
+                    return full
+        except OSError:
+            pass
+        return canonical_path
+
+    def create_standard_folders(self):
+        """Create missing standard subfolders, after confirming with the user.
+        Existing name-variants are reused rather than duplicated."""
+        if not self.job_folder_path:
+            return
+
+        scan = self._scan_standard_folders()
+        to_create = [s['canonical'] for s in scan if s['status'] == 'missing']
+        matched = [s for s in scan if s['status'] == 'matched']
+
+        if not to_create:
+            self.status_bar.set_message("All standard folders already exist", "info")
+            self.refresh_folder_contents()
+            return
+
+        # Confirmation listing exactly what will be created and what is reused
+        lines = ["Create the following folder(s) in:", self.job_folder_path, "",
+                 "WILL CREATE:"]
+        lines += [f"     • {name}" for name in to_create]
+        if matched:
+            lines += ["", "ALREADY PRESENT (will be used, not duplicated):"]
+            lines += [f"     • {s['canonical']}  →  existing \"{s['actual']}\""
+                      for s in matched]
+        lines += ["", "Proceed?"]
+        if not messagebox.askyesno("Create Standard Folders", "\n".join(lines)):
+            return
+
+        created = []
+        for name in to_create:
+            if ensure_directory(Path(os.path.join(self.job_folder_path, name))):
+                created.append(name)
+        self.status_bar.set_message(
+            f"Created {len(created)} folder(s): {', '.join(created)}", "success")
+        self.refresh_folder_contents()
+        self.detect_revisions()
+
+    def refresh_folder_contents(self):
+        """Refresh the standard-folder status and the two file lists."""
+        if not self.job_folder_path:
+            self.folders_status_label.config(
+                text="Select a job folder to see its contents.",
+                fg=Theme.TEXT_SECONDARY)
+            self.create_folders_btn.set_enabled(False)
+            self._populate_file_list(self.artsetups_listbox, None)
+            self._populate_file_list(self.proofs_listbox, None)
+            return
+
+        scan = self._scan_standard_folders()
+        missing = [s['canonical'] for s in scan if s['status'] == 'missing']
+        matched = [s for s in scan if s['status'] == 'matched']
+        if missing:
+            self.folders_status_label.config(
+                text="Missing folder(s): " + ", ".join(missing),
+                fg=Theme.ACCENT_WARNING)
+            self.create_folders_btn.set_enabled(True)
+        elif matched:
+            note = "; ".join(f"{s['canonical']}→{s['actual']}" for s in matched)
+            self.folders_status_label.config(
+                text="All present (reusing existing: " + note + ")",
+                fg=Theme.ACCENT_SUCCESS)
+            self.create_folders_btn.set_enabled(False)
+        else:
+            self.folders_status_label.config(
+                text="All 5 standard folders present.", fg=Theme.ACCENT_SUCCESS)
+            self.create_folders_btn.set_enabled(False)
+
+        self._populate_file_list(
+            self.artsetups_listbox, self._resolve_subfolder(SUBFOLDER_ART_SETUPS))
+        self._populate_file_list(
+            self.proofs_listbox, self._resolve_subfolder(SUBFOLDER_PROOFS))
+
+        # Sync the watch baseline so the poll doesn't immediately re-refresh
+        self._last_folder_sig = self._folder_signature()
+
+    def _folder_signature(self):
+        """A cheap snapshot of the standard folders' presence and contents,
+        used to detect on-disk changes between polls."""
+        if not self.job_folder_path:
+            return None
+        sig = []
+        for sub in STANDARD_SUBFOLDERS:
+            path = os.path.join(self.job_folder_path, sub)
+            if os.path.isdir(path):
+                try:
+                    names = tuple(sorted(os.listdir(path)))
+                except OSError:
+                    names = ("<unreadable>",)
+                sig.append((sub, True, names))
+            else:
+                sig.append((sub, False, ()))
+        return tuple(sig)
+
+    def _poll_folder_contents(self):
+        """Periodically re-read the job folder and refresh the UI if it changed
+        on disk (e.g. files added/removed/renamed outside the app)."""
+        try:
+            sig = self._folder_signature()
+            if sig != self._last_folder_sig:
+                self._last_folder_sig = sig
+                self.refresh_folder_contents()
+        except Exception:
+            logger.exception("Folder watch poll failed")
+        finally:
+            # Reschedule; ~2s feels live without hammering the disk
+            self.root.after(2000, self._poll_folder_contents)
+
+    def _populate_file_list(self, listbox, folder):
+        """Fill a file listbox from a folder (None/missing -> placeholder)."""
+        listbox.delete(0, tk.END)
+        listbox._file_paths = []
+
+        def placeholder(text):
+            listbox.insert(tk.END, text)
+            listbox._file_paths.append(None)
+            listbox.itemconfig(0, fg=Theme.TEXT_TERTIARY)
+
+        if not folder or not os.path.isdir(folder):
+            placeholder("(folder not present)")
+            return
+        try:
+            names = sorted(os.listdir(folder))
+        except OSError:
+            placeholder("(could not read folder)")
+            return
+        files = [n for n in names if os.path.isfile(os.path.join(folder, n))]
+        if not files:
+            placeholder("(empty)")
+            return
+        for name in files:
+            listbox.insert(tk.END, name)
+            listbox._file_paths.append(os.path.join(folder, name))
+
+    def _on_file_list_open(self, event):
+        """Open the double-clicked file with the OS default application."""
+        listbox = event.widget
+        selection = listbox.curselection()
+        if not selection:
+            return
+        paths = getattr(listbox, "_file_paths", [])
+        idx = selection[0]
+        if idx < len(paths) and paths[idx]:
+            if open_file(paths[idx]):
+                self.status_bar.set_message(
+                    f"Opened {os.path.basename(paths[idx])}", "info")
+            else:
+                self.status_bar.set_message("Could not open file", "error")
 
     def set_job_folder(self, folder_path: str):
         """Set and parse the job folder"""
         self.job_folder_path = folder_path
 
-        # Update display
-        self.job_folder_display.config(state="normal")
-        self.job_folder_display.delete(0, tk.END)
-        self.job_folder_display.insert(0, folder_path)
-        self.job_folder_display.config(state="readonly", fg=Theme.TEXT_PRIMARY)
+        # Update display with the native path form (e.g. backslashes on Windows)
+        # so it matches how the address would normally be typed/pasted.
+        # set_text handles readonly + placeholder correctly.
+        self.job_folder_display.set_text(os.path.normpath(folder_path))
 
         # Parse folder name
         folder_name = os.path.basename(folder_path)
         parsed = JobFolderParser.parse(folder_name)
+
+        # Resolve the job date. Prefer the date encoded in the job number; if
+        # the folder name has no date (old-style numeric jobs), fall back to the
+        # folder's created-date metadata and flag it as such.
+        job_date = parsed.job_date
+        date_source = parsed.date_source  # "name" when parsed from the folder
+        if not job_date:
+            job_date = self._get_folder_created_date(folder_path)
+            date_source = "metadata" if job_date else ""
+
         self.job_info = {
             "job_number": parsed.job_number,
             "customer": parsed.customer,
@@ -603,21 +1055,24 @@ class FileRenamerPro:
             "sku": parsed.sku,
             "quantity": parsed.quantity,
             "po_number": parsed.po_number,
+            "job_date": job_date,
+            "date_source": date_source,
         }
 
-        # Update info display
-        self.info_job.config(text=self.job_info.get("job_number") or "-")
-        self.info_customer.config(text=self.job_info.get("customer") or "-")
-        self.info_company.config(text=self.job_info.get("company") or "-")
-        self.info_sku.config(text=self.job_info.get("sku") or "-")
-        self.info_qty.config(text=self.job_info.get("quantity") or "-")
-        self.info_po.config(text=self.job_info.get("po_number") or "-")
+        # Update info display. Job#, customer, company, SKU, qty and PO# are all
+        # parsed from the folder name; the date may instead come from metadata.
+        self._set_info_field(self.info_job, self.info_job_src, self.job_info.get("job_number"), "name")
+        self._set_info_field(self.info_customer, self.info_customer_src, self.job_info.get("customer"), "name")
+        self._set_info_field(self.info_company, self.info_company_src, self.job_info.get("company"), "name")
+        self._set_info_field(self.info_sku, self.info_sku_src, self.job_info.get("sku"), "name")
+        self._set_info_field(self.info_qty, self.info_qty_src, self.job_info.get("quantity"), "name")
+        self._set_info_field(self.info_po, self.info_po_src, self.job_info.get("po_number"), "name")
+        self._set_info_field(self.info_date, self.info_date_src, job_date, date_source)
 
-        # Ensure subfolders exist
-        art_setups = os.path.join(folder_path, SUBFOLDER_ART_SETUPS)
-        proofs = os.path.join(folder_path, SUBFOLDER_PROOFS)
-        ensure_directory(Path(art_setups))
-        ensure_directory(Path(proofs))
+        # Show standard-folder status and list current contents. Folders are no
+        # longer auto-created here — use the "Create Folders" button. (The rename
+        # service still creates a destination folder on demand if needed.)
+        self.refresh_folder_contents()
 
         # Add to recent folders
         self.config.add_recent_folder(folder_path)
@@ -625,7 +1080,7 @@ class FileRenamerPro:
 
         self.detect_revisions()
         self.update_previews()
-        self.status_bar.set_message(f"Loaded job: {folder_name}", "success")
+        self.job_loaded_label.config(text=f"✓ Loaded job: {folder_name}")
         logger.info(f"Set job folder: {folder_path}")
 
     def detect_revisions(self):
@@ -638,7 +1093,7 @@ class FileRenamerPro:
             self.existing_rev_label.config(text="")
             return
 
-        art_folder = os.path.join(self.job_folder_path, SUBFOLDER_ART_SETUPS)
+        art_folder = self._resolve_subfolder(SUBFOLDER_ART_SETUPS)
         all_existing = self.revision_detector.get_existing_revisions(art_folder, base_pattern)
 
         if all_existing:
@@ -717,8 +1172,8 @@ class FileRenamerPro:
 
         # Collect all files
         files_to_process = []
-        art_folder = os.path.join(self.job_folder_path, SUBFOLDER_ART_SETUPS)
-        proof_folder = os.path.join(self.job_folder_path, SUBFOLDER_PROOFS)
+        art_folder = self._resolve_subfolder(SUBFOLDER_ART_SETUPS)
+        proof_folder = self._resolve_subfolder(SUBFOLDER_PROOFS)
 
         for f in self.drop_main.get_files():
             files_to_process.append({
@@ -953,7 +1408,7 @@ def main():
     else:
         root = tk.Tk()
 
-    app = FileRenamerPro(root)
+    app = JobArtNamingHelper(root)
     root.mainloop()
 
 

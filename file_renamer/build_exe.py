@@ -36,7 +36,7 @@ def build(version: str = "v2"):
         sys.executable, "-m", "PyInstaller",
         "--onefile",                          # Single .exe file
         "--windowed",                         # No console window
-        "--name", "FileRenamerPro",           # Output name
+        "--name", "JobArtNamingHelper",       # Output name
         "--icon", "app_icon.ico",             # Custom icon
         "--add-data", "config.json;.",        # Include config file
         "--add-data", "src;src",              # Include src module
@@ -66,7 +66,7 @@ def build(version: str = "v2"):
         print("=" * 50)
         print()
         
-        exe_path = SCRIPT_DIR / 'dist' / 'FileRenamerPro.exe'
+        exe_path = SCRIPT_DIR / 'dist' / 'JobArtNamingHelper.exe'
         print(f"Executable created at:")
         print(f"  {exe_path}")
         print()
@@ -75,7 +75,7 @@ def build(version: str = "v2"):
         usb_deploy = SCRIPT_DIR / 'USB_Deploy'
         usb_deploy.mkdir(exist_ok=True)
         
-        dest_exe = usb_deploy / 'FileRenamerPro.exe'
+        dest_exe = usb_deploy / 'JobArtNamingHelper.exe'
         dest_config = usb_deploy / 'config.json'
         
         try:

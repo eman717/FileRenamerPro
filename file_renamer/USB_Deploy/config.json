@@ -21,6 +21,14 @@
         "HOODIE-MD",
         "HOODIE-LG"
     ],
+    "production_types": [
+        "PRINT",
+        "CUTFILE",
+        "SUBLIMATION",
+        "DTF",
+        "EMBROIDERY",
+        "LASER"
+    ],
     "file_purposes": [
         "PROOF",
         "PRINT",
@@ -43,14 +51,20 @@
         "reminder_interval_minutes": 15,
         "auto_save_log": true
     },
-    "log_directory": "time_logs",
     "job_folder_settings": {
         "base_directory": "",
         "job_number_pattern": "^(\\d+)",
-        "example_formats": [
-            "12345 - Client Name",
-            "JOB-12345",
-            "12345_ProjectName"
-        ]
-    }
+        "recent_folders": [
+            "M:/My Drive/ILN Deal DB/J20260603-1 (Janelle Nelson @ Her Request) KC Royals branding"
+        ],
+        "max_recent": 10
+    },
+    "duplicate_handling": {
+        "mode": "ask",
+        "auto_increment_format": "_{n}"
+    },
+    "log_directory": "time_logs",
+    "backup_before_rename": false,
+    "show_tooltips": true,
+    "confirm_before_rename": true
 }

@@ -2,11 +2,13 @@
 
 Collection of internal tools for ILN workflow management.
 
-**Repository**: https://github.com/eman717/FileRenamerPro
+**Repository**: https://github.com/eman717/JobArtNamingHelper
 
-## File Renamer Pro v2.0
+## Job Art Naming Helper v2.0
 
-A desktop application for standardized artwork file naming and time tracking.
+(Formerly "File Renamer Pro".) A desktop application for managing artwork jobs:
+job-folder parsing, standardized file naming/routing, standard-folder
+scaffolding, revision detection, and time tracking.
 
 ### Location
 `file_renamer/`
@@ -67,7 +69,7 @@ file_renamer/
 │   ├── test_job_parser.py
 │   └── test_utils.py
 ├── USB_Deploy/                 # Deployment folder
-│   ├── FileRenamerPro.exe
+│   ├── JobArtNamingHelper.exe
 │   └── config.json
 ├── file_renamer_pro.py         # Original v1 application
 ├── file_renamer_pro_v2.py      # New v2 application (recommended)
@@ -103,10 +105,10 @@ cd file_renamer
 python build_exe.py v2      # Build v2 (default)
 python build_exe.py v1      # Build v1 (legacy)
 ```
-Output: `dist/FileRenamerPro.exe` (also copied to `USB_Deploy/`)
+Output: `dist/JobArtNamingHelper.exe` (also copied to `USB_Deploy/`)
 
 ### Deployment
-1. Copy `FileRenamerPro.exe` from `USB_Deploy/` folder
+1. Copy `JobArtNamingHelper.exe` from `USB_Deploy/` folder
 2. Optionally copy `config.json` for customization
 3. App creates `time_logs/` folder automatically for session tracking
 

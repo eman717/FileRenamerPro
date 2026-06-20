@@ -25,6 +25,7 @@ nul
 *.swo
 
 # Logs (keep directory structure but not contents)
+*.log
 time_logs/*.json
 
 # OS

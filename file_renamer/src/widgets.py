@@ -277,6 +277,9 @@ class StyledEntry(tk.Entry):
 
     def __init__(self, parent, placeholder: str = "", **kwargs):
         super().__init__(parent, bg=Theme.BG_TERTIARY, fg=Theme.TEXT_PRIMARY,
+                        readonlybackground=Theme.BG_TERTIARY,
+                        disabledbackground=Theme.BG_TERTIARY,
+                        disabledforeground=Theme.TEXT_SECONDARY,
                         insertbackground=Theme.ACCENT_PRIMARY, relief="flat",
                         highlightthickness=2, highlightbackground=Theme.BORDER_SUBTLE,
                         highlightcolor=Theme.BORDER_FOCUS, font=Theme.FONT_BODY, **kwargs)
@@ -303,6 +306,28 @@ class StyledEntry(tk.Entry):
     def _on_focus_out(self, e):
         if not self.get():
             self._show_placeholder()
+
+    def set_text(self, text: str):
+        """
+        Programmatically set the entry's text, correctly bypassing the
+        placeholder machinery and any 'readonly' state. Without this, callers
+        that insert text directly leave _has_placeholder True (so the focus
+        handlers can wipe the value) and can't write to a readonly entry.
+        """
+        was_readonly = str(self["state"]) == "readonly"
+        if was_readonly:
+            self.config(state="normal")
+
+        self.delete(0, tk.END)
+        if text:
+            self._has_placeholder = False
+            self.insert(0, text)
+            self.config(fg=Theme.TEXT_PRIMARY)
+        else:
+            self._show_placeholder()
+
+        if was_readonly:
+            self.config(state="readonly")
 
     def get_value(self) -> str:
         """Get the actual value (not placeholder)"""

@@ -69,17 +69,17 @@ class Theme:
     FONT_BODY = (_fonts['body'][0], 9)
     FONT_SMALL = (_fonts['body'][0], 8)
     FONT_MONO = (_fonts['mono'][0], 9)
-    FONT_MONO_LARGE = (_fonts['mono'][0], 28, "bold")
+    FONT_MONO_LARGE = (_fonts['mono'][0], 22, "bold")
     FONT_BUTTON = (_fonts['body'][0], 9)
-    FONT_TITLE = (_fonts['display'][0], 18, "bold")
+    FONT_TITLE = (_fonts['display'][0], 15, "bold")
     FONT_SECTION = (_fonts['body'][0], 9)
 
-    # Spacing
-    PAD_XS = 3
-    PAD_SM = 6
-    PAD_MD = 10
-    PAD_LG = 12
-    PAD_XL = 18
+    # Spacing (compact, for a narrow resizable window)
+    PAD_XS = 2
+    PAD_SM = 4
+    PAD_MD = 7
+    PAD_LG = 9
+    PAD_XL = 12
 
     # Animation/Timing
     HOVER_DELAY = 50  # ms
